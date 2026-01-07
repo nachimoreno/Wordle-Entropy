@@ -1,10 +1,11 @@
 import csv
 import random
 import math
-import statistics
+import os
 import json
 
 WORDLE_CSV = "wordle.csv"
+OPENER_SCORES = "opener_scores.json"
 
 def fetch_words(path: str) \
         -> list:
@@ -72,53 +73,52 @@ def take_input(wordlist: list,
         return word
 
 
-def evaluate_guess(guess: str,
-                   goal_word: str) \
-        -> tuple[set[str], list[str]]:
-
-    if guess is None or goal_word is None:
-        raise ValueError("Invalid input: guess cannot be None.")
+def pattern(guess: str,
+            answer: str) \
+        -> tuple:
 
     guess = guess.lower()
-    goal_word = goal_word.lower()
+    answer = answer.lower()
 
-    intersection = set(guess) & set(goal_word)
+    remaining_answer = {}
+    for char in answer:
+        if char in remaining_answer.keys():
+            remaining_answer[char] += 1
+        else:
+            remaining_answer[char] = 1
 
-    if len(intersection) == 0:
-        print("No matching letters found.")
-        return intersection, ['_','_','_','_','_']
+    p = [0,0,0,0,0]
 
-    matches = ['_','_','_','_','_']
+    for i in range(len(answer)):
+        if guess[i] == answer[i]:
+            p[i] = 2
+            remaining_answer[answer[i]] -= 1
 
-    for pos in range(5):
-        if guess[pos] == goal_word[pos]:
-            matches[pos] = guess[pos]
+    for i in range(len(p)):
+        if p[i] == 2: continue
 
-    return intersection, matches
+        if remaining_answer.get(guess[i], 0) > 0:
+            p[i] = 1
+            remaining_answer[guess[i]] -= 1
+
+    return p[0], p[1], p[2], p[3], p[4]
 
 
 def update_game_state(known_letters: set[str],
-                      matches: list[str],
+                      matches: str,
                       guess:str,
-                      goal_word:str) \
+                      answer:str) \
     -> None:
 
-    intersection, found_matches = evaluate_guess(guess, goal_word)
+    p = pattern(guess, answer)
 
-    for pos in range(len(matches)):
-        if found_matches[pos] == '_': continue
-        matches[pos] = found_matches[pos]
-
-    known_letters.update(intersection)
 
 
 def print_info(known_letters: set[str],
-                matches: list[str]) \
+                matches: str) \
     -> None:
 
-    matchstring = ''.join(matches)
-
-    print(f"\nKnown positions: {matchstring}")
+    print(f"\nKnown positions: {matches}")
     print(f"Known letters: {known_letters}\n")
 
 
@@ -129,7 +129,7 @@ def game():
 
     won = False
     known_letters = set()
-    matches = ['_','_','_','_','_']
+    matches = '_____'
     guesses = []
 
     for _ in range(6):
@@ -193,41 +193,53 @@ def total_possible_matches(words,
     return len(possible_matches)
 
 
-def compute_opener_scores():
-    opener_scores = {}
+def compute_entropy():
+    if os.path.exists(OPENER_SCORES):
+        print("Loading opener scores from disk...")
+        with open(OPENER_SCORES, "r", encoding="utf-8") as f:
+            opener_scores = json.load(f)
+
+        # convert list of [word, score] back to dict if needed
+        opener_scores = dict(opener_scores)
+        return opener_scores
+
+    print("Computing opener scores...")
+
     words = fetch_words(WORDLE_CSV)
-    answer_words = [word for word in words if word[2] != '']
+    answers = [word[0] for word in words if word[2] != ""]
+    opener_scores = {}
+    N = len(answers)
 
-    ca = 0
-    for answer in answer_words:
-        ca += 1
-        cw = 0
-        for word in words:
-            cw += 1
-            print(f"{ca}/{len(answer_words)}: {answer[0]} |{cw}/{len(words)}: {word[0]}")
+    for idx, word in enumerate(words, 1):
+        if idx % 1000 == 0: print(f"testing word: {word[0]}")
+        opener = word[0]
+        buckets = {}
 
-            intersection, matches = evaluate_guess(word[0], answer[0])
-            tpm = total_possible_matches(words, intersection, matches)
-            p = tpm / len(words)
-            bits = p_to_bits(p)
+        for answer in answers:
+            p = pattern(opener, answer)
+            buckets[p] = buckets.get(p, 0) + 1
 
-            if not word[0] in opener_scores:
-                opener_scores[word[0]] = [bits]
-            else:
-                opener_scores[word[0]].append(bits)
+        logN = math.log2(N)
+        post_entropy = 0.0
+        invN = 1.0 / N
 
-    for word in opener_scores:
-        mean = statistics.mean(opener_scores[word])
-        opener_scores[word] = mean
+        for c in buckets.values():
+            post_entropy += (c * invN) * math.log2(c)
 
-    sorted_opener_scores = sorted(opener_scores.items(), key=lambda dct: dct[1], reverse=True)
+        info_gain_bits = logN - post_entropy
+        opener_scores[opener] = info_gain_bits
+
+    sorted_opener_scores = sorted(opener_scores.items(), key=lambda kv: kv[1], reverse=True)
 
     with open("opener_scores.json", "w", encoding="utf-8") as f:
         json.dump(sorted_opener_scores, f, indent=4)
 
+    return sorted_opener_scores
+
 
 def analysis():
-    compute_opener_scores()
+    print(compute_entropy())
 
 
-if __name__ == "__main__": analysis()
+if __name__ == "__main__":
+    analysis()
