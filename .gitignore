@@ -1,0 +1,8 @@
+.idea/Wordle.iml
+.idea/inspectionProfiles/profiles_settings.xml
+.idea/vcs.xml
+.idea/modules.xml
+.idea/misc.xml
+.idea/.gitignore
+pattern_matrix.bin
+__pycache__/wordle.cpython-311.pyc
