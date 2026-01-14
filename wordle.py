@@ -1,233 +1,210 @@
 import csv
+import os
 import random
 import math
-import statistics
-import json
 
 WORDLE_CSV = "wordle.csv"
+PATTERN_MATRIX_FILE = "pattern_matrix.bin"
+cached_matrix = None
 
-def fetch_words(path: str) \
-        -> list:
+
+def fetch_words(path: str) -> list:
+    """
+    Fetches the list of accepted words from the given path.
+
+    :param path: Path to the CSV file containing the words.
+    
+    :return: List of tuples (word, frequency, the day it was 
+    used as an answer, and the set of characters in the word).
+    """
     words = []
 
     with open(path, 'r') as f:
         reader = csv.reader(f)
 
         for row in reader:
-            words.append((row[0], row[1], row[2]))
+            words.append((row[0], row[1], row[2], set(row[0])))
 
     del words[0]
 
     return words
 
 
-def isolate_words(words: list) \
-        -> list:
-
-    wordlist = []
-
-    for word in words:
-        wordlist.append(word[0])
-
-    return wordlist
+def isolate_words(words_data: list) -> list:
+    """
+    Extracts all valid guessable words from the data.
+    """
+    return [w[0] for w in words_data]
 
 
-def pick_goal_word(words: list) \
-        -> str:
-    while True:
-        choice = random.choice(words)
-        if choice[2] != "": break
-
-    return choice[0]
+def isolate_answers(words_data: list) -> list:
+    """
+    Extracts only the words that are valid answers (have a date string).
+    """
+    return [w[0] for w in words_data if w[2] != ""]
 
 
-def take_input(wordlist: list,
-               guesses: list,) \
-        -> str:
-
-    while True:
-
-        word = input("Guess a word: ").strip().lower()
-
-        if word in guesses:
-            print("Invalid input: Already entered.")
+def compute_pattern(guess: str, 
+                    answer: str) \
+                    -> int:
+    """
+    Computes the standard Wordle pattern for a given guess and answer.
+    Returns an integer 0..242 representing the pattern in base 3.
+    0 = Grey, 1 = Yellow, 2 = Green.
+    Pattern is encoded as: p[0]*3^0 + p[1]*3^1 + ... + p[4]*3^4
+    """
+    # 0 = Grey, 1 = Yellow, 2 = Green
+    pattern = [0] * 5
+    
+    # optimize counts
+    answer_counts = {}
+    for char in answer:
+        answer_counts[char] = answer_counts.get(char, 0) + 1
+        
+    # First pass: Green
+    for i in range(5):
+        if guess[i] == answer[i]:
+            pattern[i] = 2
+            answer_counts[guess[i]] -= 1
+            
+    # Second pass: Yellow
+    for i in range(5):
+        if pattern[i] == 2:
             continue
-
-        if len(word) > 5:
-            print("Invalid input: Too many characters (must be 5).")
-            continue
-        if len(word) < 5:
-            print("Invalid input: Too few characters (must be 5).")
-            continue
-
-        if not word.isalpha():
-            print("Invalid input: Only alphabetic characters are allowed.")
-            continue
-
-        if word not in wordlist:
-            print(f"Invalid input: '{word}' is not in the wordle set.")
-            continue
-
-        guesses.append(word)
-        return word
+        g_char = guess[i]
+        if answer_counts.get(g_char, 0) > 0:
+            pattern[i] = 1
+            answer_counts[g_char] -= 1
+            
+    # Encode to integer
+    code = 0
+    mult = 1
+    for p in pattern:
+        code += p * mult
+        mult *= 3
+        
+    return code
 
 
-def evaluate_guess(guess: str,
-                   goal_word: str) \
-        -> tuple[set[str], list[str]]:
-
-    if guess is None or goal_word is None:
-        raise ValueError("Invalid input: guess cannot be None.")
-
-    guess = guess.lower()
-    goal_word = goal_word.lower()
-
-    intersection = set(guess) & set(goal_word)
-
-    if len(intersection) == 0:
-        print("No matching letters found.")
-        return intersection, ['_','_','_','_','_']
-
-    matches = ['_','_','_','_','_']
-
-    for pos in range(5):
-        if guess[pos] == goal_word[pos]:
-            matches[pos] = guess[pos]
-
-    return intersection, matches
-
-
-def update_game_state(known_letters: set[str],
-                      matches: list[str],
-                      guess:str,
-                      goal_word:str) \
-    -> None:
-
-    intersection, found_matches = evaluate_guess(guess, goal_word)
-
-    for pos in range(len(matches)):
-        if found_matches[pos] == '_': continue
-        matches[pos] = found_matches[pos]
-
-    known_letters.update(intersection)
+def generate_pattern_matrix(guesses: list, 
+                            answers: list) \
+                            -> bytearray:
+    """
+    Generates a flattened matrix of patterns for (guess, answer) pairs.
+    rows: guesses, cols: answers.
+    size: len(guesses) * len(answers)
+    index = guess_idx * num_answers + answer_idx
+    """
+    num_guesses = len(guesses)
+    num_answers = len(answers)
+    matrix = bytearray(num_guesses * num_answers)
+    
+    print(f"Generating pattern matrix ({num_guesses}x{num_answers})... This may take a moment.")
+    for i, guess in enumerate(guesses):
+        if i % 100 == 0:
+            print(f"Processing row {i}/{num_guesses}")
+        for j, answer in enumerate(answers):
+            pattern = compute_pattern(guess, answer)
+            matrix[i * num_answers + j] = pattern
+            
+    return matrix
 
 
-def print_info(known_letters: set[str],
-                matches: list[str]) \
-    -> None:
-
-    matchstring = ''.join(matches)
-
-    print(f"\nKnown positions: {matchstring}")
-    print(f"Known letters: {known_letters}\n")
-
-
-def game():
-    words = fetch_words(WORDLE_CSV)
-    words_list = isolate_words(words)
-    goal_word = pick_goal_word(words)
-
-    won = False
-    known_letters = set()
-    matches = ['_','_','_','_','_']
-    guesses = []
-
-    for _ in range(6):
-        guess = take_input(words_list, guesses)
-
-        if guess == goal_word:
-            print(f"\nCorrect! {goal_word.title()} was the word to guess. Well done!")
-            won = True
-            break
-
-        update_game_state(known_letters, matches, guess, goal_word)
-        print_info(known_letters, matches)
-
-    if not won:
-        print(f"\nYou ran out of guesses. The word was '{goal_word}'!")
-
-
-def p_to_bits(p: float) -> float:
-    bits = -math.log2(p)
-    return bits
-
-
-def total_possible_matches(words,
-                           known_letters: set[str],
-                           matches: list[str]) \
-    -> int:
-
-    possible_matches = []
-
-    if matches == ['_','_','_','_','_']: char_match_available = False # To be set to false, but true for debugging
-    else: char_match_available = True
-
-    num_char_matches_possible = 0
-
-    if char_match_available:
-
-        for match in matches:
-
-            if not match == '_':
-                num_char_matches_possible += 1
-
-    for word in words:
-        if word == words[0]: continue
-
-        if known_letters.issubset(word[0]):
-
-            if char_match_available:
-                num_char_matches_found = 0
-
-                for pos in range(len(word[0])):
-
-                    if word[0][pos] == matches[pos]:
-                        num_char_matches_found += 1
-
-                if num_char_matches_found == num_char_matches_possible:
-                    possible_matches.append(word)
-                    continue
-
-            possible_matches.append(word)
-
-    return len(possible_matches)
-
-
-def compute_opener_scores():
-    opener_scores = {}
-    words = fetch_words(WORDLE_CSV)
-    answer_words = [word for word in words if word[2] != '']
-
-    ca = 0
-    for answer in answer_words:
-        ca += 1
-        cw = 0
-        for word in words:
-            cw += 1
-            print(f"{ca}/{len(answer_words)}: {answer[0]} |{cw}/{len(words)}: {word[0]}")
-
-            intersection, matches = evaluate_guess(word[0], answer[0])
-            tpm = total_possible_matches(words, intersection, matches)
-            p = tpm / len(words)
-            bits = p_to_bits(p)
-
-            if not word[0] in opener_scores:
-                opener_scores[word[0]] = [bits]
+def get_or_create_matrix(guesses: list, 
+                         answers: list) \
+                         -> bytearray:
+    global cached_matrix
+    if cached_matrix:
+        return cached_matrix
+        
+    expected_size = len(guesses) * len(answers)
+    
+    if os.path.exists(PATTERN_MATRIX_FILE):
+        try:
+            if os.path.getsize(PATTERN_MATRIX_FILE) == expected_size:
+                with open(PATTERN_MATRIX_FILE, "rb") as f:
+                    cached_matrix = bytearray(f.read())
+                return cached_matrix
             else:
-                opener_scores[word[0]].append(bits)
-
-    for word in opener_scores:
-        mean = statistics.mean(opener_scores[word])
-        opener_scores[word] = mean
-
-    sorted_opener_scores = sorted(opener_scores.items(), key=lambda dct: dct[1], reverse=True)
-
-    with open("opener_scores.json", "w", encoding="utf-8") as f:
-        json.dump(sorted_opener_scores, f, indent=4)
+                print("Matrix file size mismatch. Regenerating...")
+        except Exception as e:
+            print(f"Error loading matrix: {e}")
+            
+    cached_matrix = generate_pattern_matrix(guesses, answers)
+    with open(PATTERN_MATRIX_FILE, "wb") as f:
+        f.write(cached_matrix)
+    return cached_matrix
 
 
-def analysis():
-    compute_opener_scores()
+def calculate_remaining_space_efficient(guess: str, 
+                                       answer: str, 
+                                       candidate_indices: list, 
+                                       guesses: list, 
+                                       answers: list) \
+                                       -> int:
+    """
+    Calculates how many candidates remain after guessing 'guess' when the true answer is 'answer'.
+    
+    :param candidate_indices: List of indices into the 'answers' list (subset of potential solutions).
+    :param guesses: List of all valid guess words.
+    :param answers: List of all valid answer words.
+    """
+    matrix = get_or_create_matrix(guesses, answers)
+    num_answers = len(answers)
+    
+    try:
+        guess_idx = guesses.index(guess)
+        answer_idx = answers.index(answer) 
+    except ValueError:
+        return -1
+
+    # The observed pattern is what we get if we guess 'guess' against the TRUE 'answer'
+    observed_pattern = matrix[guess_idx * num_answers + answer_idx]
+    
+    count = 0
+    row_start_idx = guess_idx * num_answers
+    
+    # candidate_indices are indices into 'answers'
+    for idx in candidate_indices:
+        if matrix[row_start_idx + idx] == observed_pattern:
+            count += 1
+            
+    return count
 
 
-if __name__ == "__main__": analysis()
+def count_to_bits(count: int) -> int:
+    words_data = fetch_words(WORDLE_CSV)
+    total_words = len(words_data)
+
+    return -int(math.log(count / total_words, 2))
+
+
+def get_initial_candidates(answers: list) -> list:
+    """
+    Returns the initial list of candidate indices (0 to len(answers)-1).
+    """
+    return list(range(len(answers)))
+
+
+def pick_answer(answers: list) -> str:
+    return random.choice(answers)
+
+
+if __name__ == "__main__":
+    words_data = fetch_words(WORDLE_CSV)
+    guesses = isolate_words(words_data)
+    answers = isolate_answers(words_data)
+    
+    print(f"Loaded {len(guesses)} guesses and {len(answers)} answers.")
+    
+    matrix = get_or_create_matrix(guesses, answers)
+    
+    candidates = get_initial_candidates(answers)
+    print(f"Initialized with {len(candidates)} answer candidates.")
+
+    guess = "slate"
+    answer = pick_answer(answers)
+
+    remaining_candidates = calculate_remaining_space_efficient(guess, answer, candidates, guesses, answers)
+
+    print(f"There are {remaining_candidates} remaining candidates after guessing {guess}. ({count_to_bits(remaining_candidates)} bits of info gained)")
