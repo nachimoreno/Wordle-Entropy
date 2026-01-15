@@ -3,6 +3,9 @@ import os
 import random
 import math
 
+WORDLE_CSV = "data/wordle.csv"
+PATTERN_MATRIX_FILE = "data/pattern_matrix.bin"
+cached_matrix = None
 
 def fetch_words(path: str) -> list:
     """
