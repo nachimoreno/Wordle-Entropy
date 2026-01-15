@@ -141,13 +141,14 @@ def calculate_remaining_space_efficient(guess: str,
                                        candidate_indices: list, 
                                        guesses: list, 
                                        answers: list) \
-                                       -> int:
+                                       -> tuple[int, list]:
     """
     Calculates how many candidates remain after guessing 'guess' when the true answer is 'answer'.
     
     :param candidate_indices: List of indices into the 'answers' list (subset of potential solutions).
     :param guesses: List of all valid guess words.
     :param answers: List of all valid answer words.
+    :return: A tuple containing (number of remaining candidates, list of remaining candidate words).
     """
     matrix = get_or_create_matrix(guesses, answers)
     num_answers = len(answers)
@@ -156,20 +157,20 @@ def calculate_remaining_space_efficient(guess: str,
         guess_idx = guesses.index(guess)
         answer_idx = answers.index(answer) 
     except ValueError:
-        return -1
+        return -1, []
 
     # The observed pattern is what we get if we guess 'guess' against the TRUE 'answer'
     observed_pattern = matrix[guess_idx * num_answers + answer_idx]
     
-    count = 0
+    remaining_words = []
     row_start_idx = guess_idx * num_answers
     
     # candidate_indices are indices into 'answers'
     for idx in candidate_indices:
         if matrix[row_start_idx + idx] == observed_pattern:
-            count += 1
+            remaining_words.append(answers[idx])
             
-    return count
+    return len(remaining_words), remaining_words
 
 
 def count_to_bits(count: int) -> int:
@@ -191,13 +192,13 @@ def pick_answer(answers: list) -> str:
 
 
 if __name__ == "__main__":
-    words_data = fetch_words(WORDLE_CSV)
-    guesses = isolate_words(words_data)
-    answers = isolate_answers(words_data)
+    words = fetch_words(WORDLE_CSV)
+    guessable = isolate_words(words)
+    answers = isolate_answers(words)
     
-    print(f"Loaded {len(guesses)} guesses and {len(answers)} answers.")
+    print(f"Loaded {len(guessable)} guessable words and {len(answers)} answers.")
     
-    matrix = get_or_create_matrix(guesses, answers)
+    matrix = get_or_create_matrix(guessable, answers)
     
     candidates = get_initial_candidates(answers)
     print(f"Initialized with {len(candidates)} answer candidates.")
@@ -205,6 +206,10 @@ if __name__ == "__main__":
     guess = "slate"
     answer = pick_answer(answers)
 
-    remaining_candidates = calculate_remaining_space_efficient(guess, answer, candidates, guesses, answers)
+    remaining_candidates, remaining_list = calculate_remaining_space_efficient(guess, answer, candidates, guessable, answers)
 
     print(f"There are {remaining_candidates} remaining candidates after guessing {guess}. ({count_to_bits(remaining_candidates)} bits of info gained)")
+    if remaining_candidates <= 10:
+        print(f"Remaining candidates: {', '.join(remaining_list)}")
+    else:
+        print(f"First 10 candidates: {', '.join(remaining_list[:10])}...")
