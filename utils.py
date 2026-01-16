@@ -3,11 +3,12 @@ import os
 import random
 import math
 
-WORDLE_CSV = "data/wordle.csv"
 PATTERN_MATRIX_FILE = "data/pattern_matrix.bin"
 cached_matrix = None
 
-def fetch_words(path: str) -> list:
+def fetch_words(
+    path: str) \
+    -> list:
     """
     Fetches the list of accepted words from the given path.
 
@@ -29,23 +30,28 @@ def fetch_words(path: str) -> list:
     return words
 
 
-def isolate_words(words_data: list) -> list:
+def isolate_words(
+    words_data: list) \
+    -> list:
     """
     Extracts all valid guessable words from the data.
     """
     return [w[0] for w in words_data]
 
 
-def isolate_answers(words_data: list) -> list:
+def isolate_answers(
+    words_data: list) \
+    -> list:
     """
     Extracts only the words that are valid answers (have a date string).
     """
     return [w[0] for w in words_data if w[2] != ""]
 
 
-def compute_pattern(guess: str, 
-                    answer: str) \
-                    -> int:
+def compute_pattern(
+    guess: str, 
+    answer: str) \
+    -> int:
     """
     Computes the standard Wordle pattern for a given guess and answer.
     Returns an integer 0..242 representing the pattern in base 3.
@@ -85,9 +91,10 @@ def compute_pattern(guess: str,
     return code
 
 
-def generate_pattern_matrix(guesses: list, 
-                            answers: list) \
-                            -> bytearray:
+def generate_pattern_matrix(
+    guesses: list, 
+    answers: list) \
+    -> bytearray:
     """
     Generates a flattened matrix of patterns for (guess, answer) pairs.
     rows: guesses, cols: answers.
@@ -109,9 +116,10 @@ def generate_pattern_matrix(guesses: list,
     return matrix
 
 
-def get_or_create_matrix(guesses: list, 
-                         answers: list) \
-                         -> bytearray:
+def get_or_create_matrix(
+    guesses: list, 
+    answers: list) \
+    -> bytearray:
     """
     Gets the pattern matrix for the given guesses and answers.
     If the matrix has already been generated, it is returned from the cache.
@@ -140,12 +148,13 @@ def get_or_create_matrix(guesses: list,
     return cached_matrix
 
 
-def calculate_remaining_space_efficient(guess: str, 
-                                       answer: str, 
-                                       candidate_indices: list, 
-                                       guesses: list, 
-                                       answers: list) \
-                                       -> tuple[int, list]:
+def calculate_remaining_answer_space(
+    guess: str, 
+    answer: str, 
+    candidate_indices: list, 
+    guessables: list, 
+    answers: list) \
+    -> tuple[int, list]:
     """
     Calculates how many candidates remain after guessing 'guess' when the true answer is 'answer'.
     
@@ -154,11 +163,11 @@ def calculate_remaining_space_efficient(guess: str,
     :param answers: List of all valid answer words.
     :return: A tuple containing (number of remaining candidates, list of remaining candidate words).
     """
-    matrix = get_or_create_matrix(guesses, answers)
+    matrix = get_or_create_matrix(guessables, answers)
     num_answers = len(answers)
     
     try:
-        guess_idx = guesses.index(guess)
+        guess_idx = guessables.index(guess)
         answer_idx = answers.index(answer) 
     except ValueError:
         return -1, []
@@ -166,18 +175,20 @@ def calculate_remaining_space_efficient(guess: str,
     # The observed pattern is what we get if we guess 'guess' against the TRUE 'answer'
     observed_pattern = matrix[guess_idx * num_answers + answer_idx]
     
-    remaining_words = []
+    remaining_answer_indices = []
     row_start_idx = guess_idx * num_answers
     
     # candidate_indices are indices into 'answers'
     for idx in candidate_indices:
         if matrix[row_start_idx + idx] == observed_pattern:
-            remaining_words.append(answers[idx])
+            remaining_answer_indices.append(idx)
             
-    return len(remaining_words), remaining_words
+    return remaining_answer_indices
 
 
-def count_to_bits(count: int) -> int:
+def count_to_bits(
+    count: int) \
+    -> int:
     """
     Converts a count of remaining answers to the number of bits of information 
     gained from the guess.
@@ -188,12 +199,66 @@ def count_to_bits(count: int) -> int:
     return -int(math.log(count / total_words, 2))
 
 
-def get_initial_candidates(answers: list) -> list:
+def get_initial_candidates(
+    answers: list) \
+    -> list:
     """
     Returns the initial list of candidate indices (0 to len(answers)-1).
     """
     return list(range(len(answers)))
 
 
-def pick_answer(answers: list) -> str:
+def pick_answer(
+    answers: list) \
+    -> str:
+    """
+    Picks a random answer from the list of answers.
+    """
     return random.choice(answers)
+
+
+def top_entropy_guesses(
+    remaining_answer_indices: list,
+    guessables: list,
+    answers: list,
+    matrix: bytearray,
+    n: int
+) -> list[tuple[str, float]]:
+    """
+    Returns the top n guesses that maximize the expected number of remaining answers.
+
+    :param remaining_answer_indices: List of indices into the 'answers' list (subset of potential solutions).
+    :param guessables: List of all valid guess words.
+    :param answers: List of all valid answer words.
+    :param matrix: The pattern matrix for the given guesses and answers.
+    :param n: The number of top guesses to return.
+    :param restrict_to_candidates: Whether to restrict the guesses to the remaining candidates.
+    :return: A list of tuples containing (guess, expected_remaining).
+    """
+
+    num_answers = len(answers)
+    k = len(remaining_answer_indices)
+    
+    if k <= 1: # returns only possible answer if there is only one left
+        return [(answers[remaining_answer_indices[0]], 0.0)] if k == 1 else []
+
+    if k < 30:
+        restrict_to_candidates = True
+    else:
+        restrict_to_candidates = False
+    
+    guess_to_idx = {w: i for i, w in enumerate(guessables)}
+    guess_indices = [guess_to_idx[answers[a_idx]] for a_idx in remaining_answer_indices]
+    results = []
+    
+    for guess_idx in guess_indices:
+        row_start_idx = guess_idx * num_answers
+        counts = [0] * 243
+        for answer_idx in remaining_answer_indices:
+            counts[matrix[row_start_idx + answer_idx]] += 1
+
+        expected_remaining = sum(c*c for c in counts) / k
+        results.append((guessables[guess_idx], expected_remaining))
+    
+    results.sort(key=lambda x: x[1])
+    return results[:n]
