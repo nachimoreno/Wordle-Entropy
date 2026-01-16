@@ -10,10 +10,10 @@ if __name__ == "__main__":
     matrix = get_or_create_matrix(guessables, answers)
     remaining_answer_indices = get_initial_candidates(answers)
 
-    print("Welcome to Wordle Solver!")
-    print("1. Play Game (You guess, I check)")
-    print("2. Helper Mode (I suggest, you tell me the pattern)")
-    mode = input("Select mode (1 or 2): ")
+    print("\nWelcome to Wordle Solver!")
+    print("  1. Play Game (You guess, I check)")
+    print("  2. Helper Mode (I suggest, you tell me the pattern)")
+    mode = input("\nSelect mode (1 or 2): ")
 
     if mode == "1":
         answer = pick_answer(answers)

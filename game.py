@@ -103,6 +103,10 @@ def start_helper(
         remaining_answer_indices = calculate_remaining_answer_space(
             guess, remaining_answer_indices, guessables, answers, pattern_int=pattern_int
         )
+
+        if len(remaining_answer_indices) == 1:
+            print(f"The word is {answers[remaining_answer_indices[0]]}")
+            break
         
         print(f"\nRemaining possible answers: {len(remaining_answer_indices)}\n")
         if len(remaining_answer_indices) <= 20:
