@@ -150,30 +150,42 @@ def get_or_create_matrix(
 
 def calculate_remaining_answer_space(
     guess: str, 
-    answer: str, 
     candidate_indices: list, 
     guessables: list, 
-    answers: list) \
-    -> tuple[int, list]:
+    answers: list,
+    answer: str = None,
+    pattern_int: int = None) \
+    -> list[int]:
     """
-    Calculates how many candidates remain after guessing 'guess' when the true answer is 'answer'.
+    Calculates how many candidates remain after guessing 'guess' given either the 
+    true answer or the observed pattern.
     
+    :param guess: The word guessed.
     :param candidate_indices: List of indices into the 'answers' list (subset of potential solutions).
-    :param guesses: List of all valid guess words.
+    :param guessables: List of all valid guess words.
     :param answers: List of all valid answer words.
-    :return: A tuple containing (number of remaining candidates, list of remaining candidate words).
+    :param answer: The true answer (optional).
+    :param pattern_int: The observed pattern as an integer (optional).
+    :return: A list of remaining candidate indices.
     """
     matrix = get_or_create_matrix(guessables, answers)
     num_answers = len(answers)
     
     try:
         guess_idx = guessables.index(guess)
-        answer_idx = answers.index(answer) 
     except ValueError:
-        return -1, []
+        return []
 
-    # The observed pattern is what we get if we guess 'guess' against the TRUE 'answer'
-    observed_pattern = matrix[guess_idx * num_answers + answer_idx]
+    if pattern_int is None:
+        if answer is None:
+            raise ValueError("Either 'answer' or 'pattern_int' must be provided.")
+        try:
+            answer_idx = answers.index(answer) 
+        except ValueError:
+            return []
+        observed_pattern = matrix[guess_idx * num_answers + answer_idx]
+    else:
+        observed_pattern = pattern_int
     
     remaining_answer_indices = []
     row_start_idx = guess_idx * num_answers
@@ -184,6 +196,22 @@ def calculate_remaining_answer_space(
             remaining_answer_indices.append(idx)
             
     return remaining_answer_indices
+
+
+def string_to_pattern(
+    p_str: str) \
+    -> int:
+    """
+    Converts a 5-digit pattern string (e.g., "00210") where 0=Grey, 1=Yellow, 2=Green
+    into the integer pattern used by the matrix.
+    """
+    code = 0
+    mult = 1
+    for char in p_str:
+        p = int(char)
+        code += p * mult
+        mult *= 3
+    return code
 
 
 def count_to_bits(
